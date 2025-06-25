@@ -1,0 +1,18 @@
+struktur:
+  0.0.0.0.0.0.0.0.0.0:
+    name: "WWAQ-System-Wurzel"
+    status: "initialisiert"
+  0.1.0.0.0.0.0.0.0.0:
+    name: "Sprachbasis DIN 31636"
+    pfad: "wwaq_system/0_sprachbasis/0_1_din31636_parser.py"
+    status: "aktiv"
+    sefira: "Keter-in-Chochmah"
+
+pipeline:
+  sequenz:
+    - hns: "0.1.0.0.0.0.0.0.0.0"
+      aktion: "sprachbasis_normalisierung"
+      kritisch: true
+      beschreibung: "DIN 31636 Normalisierung – MUSS zuerst laufen!"
+    # Weitere Schritte folgen hier
+
