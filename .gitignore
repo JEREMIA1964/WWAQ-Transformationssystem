@@ -1,3 +1,7 @@
 mein_privates_glossar.yaml
 
 .DS_Store
+.DS_Store
+__pycache__/
+*.pyc
+mein_privates_glossar.yaml
