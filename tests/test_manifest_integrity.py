@@ -1,170 +1,158 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Test Suite für WWAQ Manifest Integrität
-Pytest-basierte Tests für HNS10-Konformität
-Stand: 29. Siwan 5785
+Test Manifest Integrity
+Prüft die HNS 10.0.0.0.0.0.0.0.0.0 Manifest-Struktur
 
-Q! = Qawana! + DWEKUT!
+Stand: 29. Siwan 5785
 """
 
-import pytest
 import yaml
-from pathlib import Path
+import os
 import sys
+from pathlib import Path
 
-# Füge Parent-Directory zum Python-Path hinzu
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Füge Projekt-Root zum Python-Path hinzu
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-from wwaq_system.validators.wwaq_validator import WWAQManifestValidator, ValidationError
+
+def test_manifest_exists():
+    """Test ob Manifest existiert"""
+    manifest_path = project_root / "hns10_manifest.yaml"
+    assert manifest_path.exists(), f"Manifest nicht gefunden: {manifest_path}"
+    print("✓ Manifest existiert")
 
 
-class TestManifestIntegrity:
-    """Test-Suite für Manifest-Integrität"""
+def test_manifest_structure():
+    """Test ob Manifest korrekte Struktur hat"""
+    manifest_path = project_root / "hns10_manifest.yaml"
     
-    @pytest.fixture
-    def manifest_path(self):
-        """Fixture für Manifest-Pfad"""
-        # Suche Manifest relativ zum Test-Verzeichnis
-        test_dir = Path(__file__).parent
-        manifest = test_dir.parent / "hns10_manifest.yaml"
+    with open(manifest_path, 'r', encoding='utf-8') as f:
+        manifest = yaml.safe_load(f)
+    
+    # Prüfe Hauptstruktur
+    assert 'hierarchical_structure' in manifest, "hierarchical_structure fehlt"
+    assert 'hns_10_0_0_0_0_0_0_0_0_0' in manifest['hierarchical_structure'], "HNS 10 fehlt"
+    
+    hns10 = manifest['hierarchical_structure']['hns_10_0_0_0_0_0_0_0_0_0']
+    
+    # Prüfe Beschreibung
+    assert 'description' in hns10, "Description fehlt"
+    assert 'WWAQ' in hns10['description'], "WWAQ nicht in Description"
+    
+    # Prüfe Subsysteme
+    assert 'subsystems' in hns10, "Subsystems fehlen"
+    subsystems = hns10['subsystems']
+    
+    # Prüfe alle 10 Subsysteme
+    expected_subsystems = [
+        'hns_10_1', 'hns_10_2', 'hns_10_3', 'hns_10_4', 'hns_10_5',
+        'hns_10_6', 'hns_10_7', 'hns_10_8', 'hns_10_9', 'hns_10_0'
+    ]
+    
+    for subsystem in expected_subsystems:
+        assert subsystem in subsystems, f"Subsystem {subsystem} fehlt"
+        assert 'name' in subsystems[subsystem], f"Name fehlt in {subsystem}"
+        assert 'modules' in subsystems[subsystem], f"Module fehlen in {subsystem}"
+    
+    print("✓ Manifest-Struktur korrekt")
+
+
+def test_all_modules_defined():
+    """Test ob alle Module definiert sind"""
+    manifest_path = project_root / "hns10_manifest.yaml"
+    
+    with open(manifest_path, 'r', encoding='utf-8') as f:
+        manifest = yaml.safe_load(f)
+    
+    hns10 = manifest['hierarchical_structure']['hns_10_0_0_0_0_0_0_0_0_0']
+    total_modules = 0
+    
+    for subsystem_key, subsystem in hns10['subsystems'].items():
+        modules = subsystem.get('modules', [])
+        total_modules += len(modules)
         
-        if not manifest.exists():
-            pytest.skip(f"Manifest nicht gefunden: {manifest}")
+        # Prüfe Modul-Struktur
+        for module in modules:
+            assert 'id' in module, f"ID fehlt in Modul von {subsystem_key}"
+            assert 'name' in module, f"Name fehlt in Modul von {subsystem_key}"
+            assert 'file' in module, f"File fehlt in Modul von {subsystem_key}"
+    
+    # Sollten mindestens 100 Module sein (10x10)
+    assert total_modules >= 100, f"Nur {total_modules} Module gefunden, erwartet >= 100"
+    
+    print(f"✓ {total_modules} Module definiert")
+
+
+def test_file_paths_valid():
+    """Test ob Dateipfade gültige Python-Modulnamen sind"""
+    manifest_path = project_root / "hns10_manifest.yaml"
+    
+    with open(manifest_path, 'r', encoding='utf-8') as f:
+        manifest = yaml.safe_load(f)
+    
+    hns10 = manifest['hierarchical_structure']['hns_10_0_0_0_0_0_0_0_0_0']
+    invalid_paths = []
+    
+    for subsystem_key, subsystem in hns10['subsystems'].items():
+        for module in subsystem.get('modules', []):
+            file_path = module['file']
             
-        return str(manifest)
-    
-    @pytest.fixture
-    def validator(self, manifest_path):
-        """Fixture für Validator-Instanz"""
-        return WWAQManifestValidator(manifest_path)
-    
-    def test_manifest_exists(self, manifest_path):
-        """Test: Manifest-Datei existiert"""
-        assert Path(manifest_path).exists(), "hns10_manifest.yaml nicht gefunden"
-    
-    def test_valid_yaml(self, manifest_path):
-        """Test: Manifest ist gültiges YAML"""
-        with open(manifest_path, 'r', encoding='utf-8') as f:
-            try:
-                data = yaml.safe_load(f)
-                assert isinstance(data, dict), "Manifest muss Dictionary sein"
-            except yaml.YAMLError as e:
-                pytest.fail(f"YAML-Parse-Fehler: {e}")
-    
-    def test_meta_vollständig(self, validator):
-        """Test: Alle Meta-Felder vorhanden"""
-        erfolg = validator.validate_meta()
-        
-        # Prüfe auf kritische Fehler
-        kritische = [e for e in validator.errors if e.schweregrad == "kritisch" and e.typ == "meta"]
-        assert len(kritische) == 0, f"Meta-Validierung fehlgeschlagen: {kritische}"
-    
-    def test_hns_format(self, validator):
-        """Test: HNS-Nummern haben korrektes Format"""
-        validator.validate_struktur()
-        
-        # Prüfe auf HNS-Format-Fehler
-        hns_fehler = [e for e in validator.errors if e.typ == "hns"]
-        assert len(hns_fehler) == 0, f"Ungültige HNS-Formate: {hns_fehler}"
-    
-    def test_keine_duplikate(self, validator):
-        """Test: Keine duplizierten HNS oder Namen"""
-        validator.validate_struktur()
-        
-        # Prüfe auf Duplikate
-        duplikate = [e for e in validator.errors if e.typ == "duplikat"]
-        assert len(duplikate) == 0, f"Duplikate gefunden: {duplikate}"
-    
-    def test_pipeline_referenzen(self, validator):
-        """Test: Alle Pipeline-Referenzen existieren"""
-        validator.validate_struktur()
-        validator.validate_pipeline()
-        
-        # Prüfe auf fehlende Referenzen
-        ref_fehler = [e for e in validator.errors if e.typ == "referenz"]
-        assert len(ref_fehler) == 0, f"Fehlende Referenzen: {ref_fehler}"
-    
-    def test_sefira_zuordnung(self, validator):
-        """Test: Sefira-Namen sind gültig"""
-        validator.validate_struktur()
-        
-        # Prüfe auf ungültige Sefirot
-        sefira_warnungen = [w for w in validator.warnings if w.typ == "sefira"]
-        
-        # Erlaubte Spezialfälle
-        erlaubt = ["Über Malchut - Azilut selbst", "Keter-in-Chochmah"]
-        
-        for warnung in sefira_warnungen:
-            # Prüfe ob es ein erlaubter Spezialfall ist
-            gefunden = False
-            for erlaubter in erlaubt:
-                if erlaubter in warnung.beschreibung:
-                    gefunden = True
-                    break
+            # Prüfe ob Pfad mit .py endet
+            if not file_path.endswith('.py'):
+                invalid_paths.append(f"{module['id']}: {file_path} (nicht .py)")
             
-            assert gefunden, f"Ungültige Sefira: {warnung.beschreibung}"
+            # Prüfe ob Pfad gültige Python-Module sind
+            parts = file_path.replace('.py', '').split('/')
+            for part in parts:
+                if not part.replace('_', '').isalnum():
+                    invalid_paths.append(f"{module['id']}: {file_path} (ungültiger Modulname)")
     
-    def test_wwaq_konformität(self, validator):
-        """Test: WWAQ-spezifische Regeln eingehalten"""
-        validator.validate_wwaq_konformität()
-        
-        # Prüfe auf kritische WWAQ-Verstöße
-        wwaq_kritisch = [e for e in validator.errors 
-                        if e.schweregrad == "kritisch" and "wwaq" in e.typ]
-        
-        assert len(wwaq_kritisch) == 0, f"WWAQ-Verstöße: {wwaq_kritisch}"
+    assert len(invalid_paths) == 0, f"Ungültige Pfade gefunden:\n" + "\n".join(invalid_paths)
     
-    def test_vollständige_validierung(self, validator):
-        """Test: Gesamtvalidierung erfolgreich"""
-        erfolg = validator.run_all_validations()
-        
-        if not erfolg:
-            print("\n" + validator.generate_report())
-            
-        assert erfolg, "Manifest-Validierung fehlgeschlagen"
-    
-    def test_struktur_hat_module(self, validator):
-        """Test: Mindestens ein Modul definiert"""
-        struktur = validator.manifest.get("struktur", [])
-        assert len(struktur) > 0, "Keine Module in Struktur definiert"
-    
-    def test_pipeline_hat_schritte(self, validator):
-        """Test: Pipeline hat mindestens einen Schritt"""
-        pipeline = validator.manifest.get("pipeline", {})
-        sequenz = pipeline.get("sequenz", [])
-        assert len(sequenz) > 0, "Pipeline hat keine Schritte"
+    print("✓ Alle Dateipfade gültig")
 
 
-# Zusätzliche Integrationstests
-class TestManifestContent:
-    """Tests für Manifest-Inhalte"""
+def test_no_duplicate_ids():
+    """Test ob alle Modul-IDs eindeutig sind"""
+    manifest_path = project_root / "hns10_manifest.yaml"
     
-    @pytest.fixture
-    def manifest_data(self, manifest_path):
-        """Lädt Manifest-Daten"""
-        with open(manifest_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f)
+    with open(manifest_path, 'r', encoding='utf-8') as f:
+        manifest = yaml.safe_load(f)
     
-    def test_version_format(self, manifest_data):
-        """Test: Version hat korrektes Format"""
-        version = manifest_data.get("meta", {}).get("version", "")
-        assert re.match(r'^\d+\.\d+\.\d+', version), f"Ungültiges Versionsformat: {version}"
+    hns10 = manifest['hierarchical_structure']['hns_10_0_0_0_0_0_0_0_0_0']
+    all_ids = []
     
-    def test_schema_ist_hns10(self, manifest_data):
-        """Test: Schema ist HNS10"""
-        schema = manifest_data.get("meta", {}).get("schema", "")
-        assert schema == "HNS10", f"Unerwartetes Schema: {schema}"
+    for subsystem_key, subsystem in hns10['subsystems'].items():
+        for module in subsystem.get('modules', []):
+            all_ids.append(module['id'])
     
-    def test_kritische_pipeline_schritte(self, manifest_data):
-        """Test: Kritische Schritte markiert"""
-        pipeline = manifest_data.get("pipeline", {})
-        sequenz = pipeline.get("sequenz", [])
-        
-        kritische = [s for s in sequenz if s.get("kritisch", False)]
-        assert len(kritische) > 0, "Keine kritischen Pipeline-Schritte definiert"
+    # Prüfe auf Duplikate
+    duplicates = [id for id in all_ids if all_ids.count(id) > 1]
+    unique_duplicates = list(set(duplicates))
+    
+    assert len(unique_duplicates) == 0, f"Doppelte IDs gefunden: {unique_duplicates}"
+    
+    print(f"✓ Alle {len(all_ids)} IDs sind eindeutig")
 
 
 if __name__ == "__main__":
-    # Führe Tests aus
-    pytest.main([__file__, "-v"])
+    print("\nMANIFEST INTEGRITY TESTS")
+    print("="*40)
+    
+    try:
+        test_manifest_exists()
+        test_manifest_structure()
+        test_all_modules_defined()
+        test_file_paths_valid()
+        test_no_duplicate_ids()
+        
+        print("\n✓ Alle Tests bestanden!")
+        print("\nQ!")
+    except AssertionError as e:
+        print(f"\n✗ Test fehlgeschlagen: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n✗ Fehler: {e}")
+        sys.exit(1)

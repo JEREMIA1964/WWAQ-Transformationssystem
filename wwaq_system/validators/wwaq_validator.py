@@ -1,321 +1,257 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-WWAQ Manifest Validator v1.0
-Vollständige Validierung für WWAQ-Konformität
-Stand: 29. Siwan 5785
+WWAQ Validator
+Prüft Texte auf WWAQ-Konformität
 
+Stand: 29. Siwan 5785
 Q! = Qawana! + DWEKUT!
 """
 
-import yaml
 import re
-from pathlib import Path
-from typing import Dict, List, Set, Optional
-from dataclasses import dataclass
-from datetime import datetime
+from typing import Dict, List, Tuple
+from dataclasses import dataclass, field
 
 
 @dataclass
-class ValidationError:
-    """Strukturierte Fehlerdarstellung"""
-    typ: str
-    modul: str
-    beschreibung: str
-    schweregrad: str  # "kritisch", "warnung", "info"
+class ValidationResult:
+    """Ergebnis einer WWAQ-Validierung"""
+    is_valid: bool = True
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    transformations: List[Tuple[str, str]] = field(default_factory=list)
+    score: float = 100.0
 
 
-class WWAQManifestValidator:
-    """
-    Umfassende Validierungsroutine für WWAQ HNS10-Manifeste
-    Prüft Meta, Struktur, Pipeline und WWAQ-spezifische Regeln
-    """
+class WWAQValidator:
+    """Hauptklasse für WWAQ-Validierung"""
     
-    HNS_PATTERN = re.compile(r"^\d{1,2}(\.\d{1,2}){9}$")
-    SEFIRA_NAMEN = {
-        "Keter", "Chochmah", "Binah", "Chesed", "Gewurah",
-        "Tiferet", "Nezach", "Hod", "Jesod", "Malchut"
-    }
-    
-    def __init__(self, manifest_path: str, strict_mode: bool = True):
-        self.manifest_path = Path(manifest_path)
-        self.strict_mode = strict_mode
-        self.errors: List[ValidationError] = []
-        self.warnings: List[ValidationError] = []
-        self.manifest = self._load_manifest()
-        
-    def _load_manifest(self) -> Dict:
-        """Lädt und parst YAML-Manifest"""
-        if not self.manifest_path.exists():
-            raise FileNotFoundError(f"Manifest nicht gefunden: {self.manifest_path}")
-            
-        with open(self.manifest_path, 'r', encoding='utf-8') as f:
-            try:
-                return yaml.safe_load(f)
-            except yaml.YAMLError as e:
-                raise ValueError(f"YAML-Parse-Fehler: {e}")
-    
-    def validate_meta(self) -> bool:
-        """Validiert Meta-Informationen"""
-        erforderlich = {"version", "schema", "stand", "ort"}
-        optional = {"quelle", "bemerkung", "sigillum_basis"}
-        
-        meta = self.manifest.get("meta", {})
-        
-        # Pflichtfelder prüfen
-        fehlend = erforderlich - set(meta.keys())
-        if fehlend:
-            self.errors.append(ValidationError(
-                typ="meta",
-                modul="root",
-                beschreibung=f"Fehlende Meta-Felder: {fehlend}",
-                schweregrad="kritisch"
-            ))
-            return False
-            
-        # Schema-Version prüfen
-        if meta.get("schema") != "HNS10" and self.strict_mode:
-            self.errors.append(ValidationError(
-                typ="schema",
-                modul="root",
-                beschreibung=f"Unerwartetes Schema: {meta.get('schema')}",
-                schweregrad="kritisch"
-            ))
-            
-        return len([e for e in self.errors if e.schweregrad == "kritisch"]) == 0
-    
-    def validate_struktur(self) -> bool:
-        """Validiert Modul-Struktur"""
-        struktur = self.manifest.get("struktur", [])
-        
-        if not struktur:
-            self.errors.append(ValidationError(
-                typ="struktur",
-                modul="root",
-                beschreibung="Keine Module in Struktur definiert",
-                schweregrad="kritisch"
-            ))
-            return False
-            
-        hns_set = set()
-        name_set = set()
-        
-        for idx, modul in enumerate(struktur):
-            # HNS-Format
-            hns = modul.get("hns", "")
-            if not self.HNS_PATTERN.match(hns):
-                self.errors.append(ValidationError(
-                    typ="hns",
-                    modul=modul.get("name", f"Modul_{idx}"),
-                    beschreibung=f"Ungültiges HNS-Format: {hns}",
-                    schweregrad="kritisch"
-                ))
-                
-            # HNS-Duplikate
-            if hns in hns_set:
-                self.errors.append(ValidationError(
-                    typ="duplikat",
-                    modul=modul.get("name", f"Modul_{idx}"),
-                    beschreibung=f"Dupliziertes HNS: {hns}",
-                    schweregrad="kritisch"
-                ))
-            hns_set.add(hns)
-            
-            # Sefira-Validierung
-            if "sefira" in modul and modul["sefira"] not in self.SEFIRA_NAMEN:
-                if modul["sefira"] not in ["Über Malchut - Azilut selbst", "Keter-in-Chochmah"]:
-                    self.warnings.append(ValidationError(
-                        typ="sefira",
-                        modul=modul.get("name", ""),
-                        beschreibung=f"Unbekannte Sefira: {modul['sefira']}",
-                        schweregrad="warnung"
-                    ))
-                    
-        return len([e for e in self.errors if e.schweregrad == "kritisch"]) == 0
-    
-    def validate_pipeline(self) -> bool:
-        """Validiert Pipeline-Definition"""
-        pipeline = self.manifest.get("pipeline", {})
-        
-        if not pipeline:
-            self.errors.append(ValidationError(
-                typ="pipeline",
-                modul="root",
-                beschreibung="Keine Pipeline definiert",
-                schweregrad="kritisch"
-            ))
-            return False
-            
-        # Verfügbare Module sammeln
-        verfügbare_module = {
-            modul["hns"]: modul["name"] 
-            for modul in self.manifest.get("struktur", [])
+    def __init__(self):
+        # Zer-Transformationen
+        self.zer_transformations = {
+            'zerbrechen': 'bersten',
+            'zerbrach': 'barst',
+            'zerbrachen': 'barsten',
+            'zerbricht': 'berstet',
+            'zerbrochen': 'geborsten',
+            'zerstören': 'wandeln',
+            'zerstört': 'gewandelt',
+            'zerstörte': 'wandelte',
+            'zerstörten': 'wandelten',
+            'zerreißen': 'öffnen',
+            'zerriss': 'öffnete',
+            'zerrissen': 'geöffnet',
+            'zerfallen': 'sich wandeln',
+            'zerfällt': 'wandelt sich',
+            'zerfiel': 'wandelte sich',
+            'zerschlagen': 'bersten',
+            'zerschlug': 'barst'
         }
         
-        # Pipeline-Sequenz prüfen
-        for schritt in pipeline.get("sequenz", []):
-            hns = schritt.get("hns", "")
-            if hns not in verfügbare_module:
-                self.errors.append(ValidationError(
-                    typ="referenz",
-                    modul=schritt.get("aktion", "Unbekannt"),
-                    beschreibung=f"HNS {hns} nicht in Struktur gefunden",
-                    schweregrad="kritisch"
-                ))
-                
-        return len([e for e in self.errors if e.schweregrad == "kritisch"]) == 0
-    
-    def validate_wwaq_konformität(self) -> bool:
-        """Prüft WWAQ-spezifische Anforderungen"""
+        # Q vs K Unterscheidung
+        self.q_vs_k_terms = {
+            'kabbala': 'Qabbala',
+            'kabbalah': 'Qabbala',
+            'kawana': 'Qawana',
+            'kavanah': 'Qawana',
+            'kavana': 'Qawana'
+        }
         
-        # 1. Q vs K Prüfung
-        yaml_text = yaml.dump(self.manifest)
+        # Verbotene anthropomorphe Phrasen
+        self.forbidden_phrases = [
+            'von herz zu herz',
+            'herz zu herz',
+            'liebevoll',
+            'sanft',
+            'gemeinsam auf dem weg',
+            'möge es in dir wachsen',
+            'berühren die mitte',
+            'seele der worte',
+            'zauber',
+            'magie'
+        ]
         
-        # Kabbala mit K ist verboten (außer in Zitaten über Berg Centre)
-        if re.search(r'\b[Kk]abbal[ah]?\b', yaml_text):
-            if "Berg" not in yaml_text:  # Ausnahme für Zitate
-                self.errors.append(ValidationError(
-                    typ="wwaq_q_vs_k",
-                    modul="global",
-                    beschreibung="'Kabbala' mit K gefunden - muss 'Qabbala' sein",
-                    schweregrad="kritisch"
-                ))
-        
-        # 2. Zer-Präfix Prüfung
-        zer_pattern = r'\bzer[a-zäöü]+\b'
-        zer_matches = re.findall(zer_pattern, yaml_text, re.IGNORECASE)
-        for match in zer_matches:
-            self.warnings.append(ValidationError(
-                typ="wwaq_zer",
-                modul="global",
-                beschreibung=f"Zer-Präfix gefunden: {match}",
-                schweregrad="warnung"
-            ))
-        
-        # 3. DIN 31636 Schreibweisen
-        falsche_schreibweisen = {
-            'tzimtzum': 'Zimzum',
-            'tzimzum': 'Zimzum',
+        # DIN 31636 Schreibweisen
+        self.din_corrections = {
             'tikkun': 'Tiqqun',
             'tikun': 'Tiqqun',
+            'tzimtzum': 'Zimzum',
+            'tzimzum': 'Zimzum',
             'dvekut': 'Dwekut',
-            'devekut': 'Dwekut'
+            'devekut': 'Dwekut',
+            'chaver': 'Chawer',
+            'haver': 'Chawer',
+            'atzilut': 'Azilut',
+            'bnei baruch': 'Bnej Baruch'
         }
-        
-        for falsch, korrekt in falsche_schreibweisen.items():
-            if falsch.lower() in yaml_text.lower():
-                self.warnings.append(ValidationError(
-                    typ="wwaq_din",
-                    modul="global",
-                    beschreibung=f"Falsche Schreibweise '{falsch}' - sollte '{korrekt}' sein",
-                    schweregrad="warnung"
-                ))
-        
-        # 4. Sigillum-Prüfung
-        if "sigillum" not in yaml_text.lower() and "𝌇" not in yaml_text:
-            self.warnings.append(ValidationError(
-                typ="wwaq_sigillum",
-                modul="global",
-                beschreibung="EOM Matrix Sigillum Referenz fehlt",
-                schweregrad="info"
-            ))
-        
-        # 5. Q! Präsenz
-        if "q!" not in yaml_text.lower():
-            self.warnings.append(ValidationError(
-                typ="wwaq_q_bestaetigung",
-                modul="global",
-                beschreibung="Q! Bestätigung fehlt",
-                schweregrad="info"
-            ))
-        
-        return True
     
-    def generate_report(self) -> str:
-        """Generiert Validierungsbericht"""
-        bericht = []
-        bericht.append("="*60)
-        bericht.append("WWAQ MANIFEST VALIDIERUNGSBERICHT")
-        bericht.append("="*60)
-        bericht.append(f"Manifest: {self.manifest_path}")
-        bericht.append(f"Zeitstempel: {datetime.now().isoformat()}")
-        bericht.append(f"Schema: {self.manifest.get('meta', {}).get('schema', 'Unbekannt')}")
-        bericht.append(f"Version: {self.manifest.get('meta', {}).get('version', 'Unbekannt')}")
-        bericht.append("")
+    def validate(self, text: str) -> ValidationResult:
+        """
+        Validiert einen Text auf WWAQ-Konformität
         
-        # Zusammenfassung
-        kritische = len([e for e in self.errors if e.schweregrad == "kritisch"])
-        warnungen = len(self.warnings)
-        
-        if kritische == 0:
-            bericht.append("✓ VALIDIERUNG ERFOLGREICH")
-        else:
-            bericht.append(f"✗ VALIDIERUNG FEHLGESCHLAGEN ({kritische} kritische Fehler)")
+        Args:
+            text: Zu validierender Text
             
-        bericht.append(f"Warnungen: {warnungen}")
-        bericht.append("")
+        Returns:
+            ValidationResult mit Details
+        """
+        result = ValidationResult()
         
-        # Details
-        if self.errors:
-            bericht.append("FEHLER:")
-            bericht.append("-"*40)
-            for fehler in self.errors:
-                bericht.append(f"[{fehler.schweregrad.upper()}] {fehler.modul}")
-                bericht.append(f"  Typ: {fehler.typ}")
-                bericht.append(f"  Beschreibung: {fehler.beschreibung}")
-                bericht.append("")
-                
-        if self.warnings:
-            bericht.append("WARNUNGEN:")
-            bericht.append("-"*40)
-            for warnung in self.warnings:
-                bericht.append(f"[{warnung.schweregrad.upper()}] {warnung.modul}")
-                bericht.append(f"  {warnung.beschreibung}")
-                
-        bericht.append("")
-        bericht.append("Q!")
+        # Prüfe Zer-Präfixe
+        self._check_zer_prefixes(text, result)
         
-        return "\n".join(bericht)
+        # Prüfe Q vs K
+        self._check_q_vs_k(text, result)
+        
+        # Prüfe Anthropomorphismen
+        self._check_anthropomorphisms(text, result)
+        
+        # Prüfe DIN-Konformität
+        self._check_din_conformity(text, result)
+        
+        # Prüfe Q! am Ende
+        self._check_q_ending(text, result)
+        
+        # Berechne Score
+        total_issues = len(result.errors) + (len(result.warnings) * 0.5)
+        result.score = max(0, 100 - (total_issues * 10))
+        result.is_valid = len(result.errors) == 0
+        
+        return result
     
-    def run_all_validations(self) -> bool:
-        """Führt alle Validierungen aus"""
-        erfolg = all([
-            self.validate_meta(),
-            self.validate_struktur(),
-            self.validate_pipeline(),
-            self.validate_wwaq_konformität()
-        ])
+    def _check_zer_prefixes(self, text: str, result: ValidationResult):
+        """Prüft auf Zer-Präfixe"""
+        for zer_word, replacement in self.zer_transformations.items():
+            pattern = rf'\b{zer_word}\b'
+            matches = list(re.finditer(pattern, text, re.IGNORECASE))
+            
+            for match in matches:
+                result.errors.append(
+                    f"Zer-Präfix gefunden: '{match.group()}' → sollte '{replacement}' sein"
+                )
+                result.transformations.append((match.group(), replacement))
+    
+    def _check_q_vs_k(self, text: str, result: ValidationResult):
+        """Prüft Q vs K Unterscheidung"""
+        for k_term, q_term in self.q_vs_k_terms.items():
+            pattern = rf'\b{k_term}\b'
+            matches = list(re.finditer(pattern, text, re.IGNORECASE))
+            
+            for match in matches:
+                # Ausnahme: Wenn über Berg Centre gesprochen wird
+                context = text[max(0, match.start()-50):match.end()+50]
+                if 'Berg' not in context and 'Centre' not in context:
+                    result.errors.append(
+                        f"K statt Q: '{match.group()}' → sollte '{q_term}' sein"
+                    )
+                    result.transformations.append((match.group(), q_term))
+    
+    def _check_anthropomorphisms(self, text: str, result: ValidationResult):
+        """Prüft auf anthropomorphe Ausdrücke"""
+        text_lower = text.lower()
         
-        return erfolg and len([e for e in self.errors if e.schweregrad == "kritisch"]) == 0
+        for phrase in self.forbidden_phrases:
+            if phrase in text_lower:
+                result.errors.append(
+                    f"Anthropomorphismus gefunden: '{phrase}'"
+                )
+        
+        # Prüfe auf Emojis
+        emoji_pattern = re.compile(r'[😀-🙏]|❤️|💕|💖|✨|🌟|⭐')
+        if emoji_pattern.search(text):
+            result.errors.append("Emojis sind nicht WWAQ-konform")
+    
+    def _check_din_conformity(self, text: str, result: ValidationResult):
+        """Prüft DIN 31636 Konformität"""
+        for wrong, correct in self.din_corrections.items():
+            pattern = rf'\b{wrong}\b'
+            matches = list(re.finditer(pattern, text, re.IGNORECASE))
+            
+            for match in matches:
+                result.warnings.append(
+                    f"DIN 31636: '{match.group()}' → sollte '{correct}' sein"
+                )
+                result.transformations.append((match.group(), correct))
+    
+    def _check_q_ending(self, text: str, result: ValidationResult):
+        """Prüft auf Q! am Ende"""
+        if not text.strip().endswith("Q!"):
+            result.warnings.append("Text sollte mit 'Q!' enden")
+    
+    def transform(self, text: str) -> str:
+        """
+        Transformiert einen Text zu WWAQ-Konformität
+        
+        Args:
+            text: Zu transformierender Text
+            
+        Returns:
+            Transformierter Text
+        """
+        # Validiere zuerst
+        validation = self.validate(text)
+        
+        # Wende alle Transformationen an
+        transformed = text
+        
+        # Sortiere Transformationen nach Position (rückwärts)
+        all_transforms = []
+        
+        # Sammle alle Transformationen mit Positionen
+        for original, replacement in validation.transformations:
+            for match in re.finditer(rf'\b{re.escape(original)}\b', transformed, re.IGNORECASE):
+                all_transforms.append((match.start(), match.end(), original, replacement))
+        
+        # Sortiere rückwärts und wende an
+        for start, end, original, replacement in sorted(all_transforms, reverse=True):
+            # Behalte Großschreibung bei
+            if transformed[start].isupper():
+                replacement = replacement[0].upper() + replacement[1:]
+            
+            transformed = transformed[:start] + replacement + transformed[end:]
+        
+        # Entferne anthropomorphe Phrasen
+        for phrase in self.forbidden_phrases:
+            pattern = rf'[^.!?]*{re.escape(phrase)}[^.!?]*[.!?]\s*'
+            transformed = re.sub(pattern, '', transformed, flags=re.IGNORECASE)
+        
+        # Entferne Emojis
+        emoji_pattern = re.compile(r'[😀-🙏]|❤️|💕|💖|✨|🌟|⭐')
+        transformed = emoji_pattern.sub('', transformed)
+        
+        # Füge Q! hinzu wenn fehlt
+        if not transformed.strip().endswith("Q!"):
+            transformed = transformed.rstrip() + "\n\nQ!"
+        
+        return transformed
 
 
-# CLI-Interface
+# Hilfsfunktion für direkten Aufruf
+def validate_text(text: str) -> Dict:
+    """Validiert einen Text und gibt Ergebnis als Dictionary zurück"""
+    validator = WWAQValidator()
+    result = validator.validate(text)
+    
+    return {
+        'valid': result.is_valid,
+        'score': result.score,
+        'errors': result.errors,
+        'warnings': result.warnings,
+        'transformations': [(o, r) for o, r in result.transformations]
+    }
+
+
 if __name__ == "__main__":
-    import argparse
+    # Test
+    test_text = "Die Kabbala lehrt dass die Kelim zerbrachen."
     
-    parser = argparse.ArgumentParser(
-        description="WWAQ Manifest Validator - Prüft HNS10-Manifeste auf Konformität"
-    )
-    parser.add_argument("manifest", help="Pfad zum YAML-Manifest")
-    parser.add_argument("--strict", action="store_true", help="Strict Mode aktivieren")
-    parser.add_argument("--output", help="Ausgabedatei für Bericht")
+    validator = WWAQValidator()
+    result = validator.validate(test_text)
     
-    args = parser.parse_args()
+    print(f"Text: {test_text}")
+    print(f"Gültig: {result.is_valid}")
+    print(f"Score: {result.score}")
+    print(f"Fehler: {result.errors}")
+    print(f"Transformiert: {validator.transform(test_text)}")
     
-    try:
-        validator = WWAQManifestValidator(args.manifest, args.strict)
-        erfolg = validator.run_all_validations()
-        bericht = validator.generate_report()
-        
-        if args.output:
-            with open(args.output, 'w', encoding='utf-8') as f:
-                f.write(bericht)
-            print(f"Bericht gespeichert: {args.output}")
-        else:
-            print(bericht)
-            
-        exit(0 if erfolg else 1)
-        
-    except Exception as e:
-        print(f"FEHLER: {e}")
-        exit(2)
+    print("\nQ!")

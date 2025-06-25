@@ -1,266 +1,203 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-WWAQ-spezifische Tests
-Prüft Einhaltung aller WWAQ-Konformitätsregeln
-Stand: 29. Siwan 5785
+Test WWAQ Specific
+Testet WWAQ-spezifische Funktionalität
 
-Q! = Qawana! + DWEKUT!
+Stand: 29. Siwan 5785
 """
 
-import pytest
-import yaml
-import re
-from pathlib import Path
 import sys
+from pathlib import Path
 
-# Füge Parent-Directory zum Python-Path hinzu
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Füge Projekt-Root zum Python-Path hinzu
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-from wwaq_system.validators.wwaq_validator import WWAQManifestValidator
-
-
-class TestWWAQSpecific:
-    """WWAQ-spezifische Konformitätstests"""
-    
-    @pytest.fixture
-    def manifest_path(self):
-        """Fixture für Manifest-Pfad"""
-        test_dir = Path(__file__).parent
-        manifest = test_dir.parent / "hns10_manifest.yaml"
-        
-        if not manifest.exists():
-            # Versuche alternative Pfade
-            manifest = test_dir.parent / "wwaq_hns10_manifest.yaml"
-            
-        if not manifest.exists():
-            pytest.skip(f"Manifest nicht gefunden")
-            
-        return str(manifest)
-    
-    @pytest.fixture
-    def manifest_text(self, manifest_path):
-        """Lädt Manifest als Text"""
-        with open(manifest_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    
-    @pytest.fixture
-    def manifest_data(self, manifest_path):
-        """Lädt Manifest als Dictionary"""
-        with open(manifest_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f)
-    
-    def test_no_k_in_qabbala(self, manifest_text):
-        """Test: Keine falsche Schreibweise 'Kabbala' mit K"""
-        # Suche nach Kabbala/Kabbalah mit K
-        k_pattern = r'\b[Kk]abbal[ah]*\b'
-        matches = re.findall(k_pattern, manifest_text)
-        
-        # Ausnahme: Wenn "Berg" im Kontext (Zitat über Berg Centre)
-        if matches and "Berg" not in manifest_text:
-            pytest.fail(f"Falsche Schreibweise gefunden: {matches}. Muss 'Qabbala' mit Q sein!")
-    
-    def test_correct_qabbala_usage(self, manifest_text):
-        """Test: 'Qabbala' wird korrekt verwendet"""
-        q_pattern = r'\b[Qq]abbala\b'
-        matches = re.findall(q_pattern, manifest_text)
-        
-        # Wenn Kabbala-Begriffe vorkommen, sollten sie mit Q sein
-        if "abbal" in manifest_text.lower():
-            assert len(matches) > 0, "Kabbala-Begriffe müssen mit Q geschrieben werden"
-    
-    def test_no_zer_prefixes(self, manifest_text):
-        """Test: Keine zer- Präfixe"""
-        zer_pattern = r'\bzer[a-zäöüß]+\b'
-        matches = re.findall(zer_pattern, manifest_text, re.IGNORECASE)
-        
-        if matches:
-            pytest.fail(f"Zer-Präfixe gefunden: {matches}. Diese müssen eliminiert werden!")
-    
-    def test_din_conformity(self, manifest_text):
-        """Test: DIN 31636 konforme Schreibweisen"""
-        falsche_schreibweisen = {
-            'tzimtzum': 'Zimzum',
-            'tzimzum': 'Zimzum', 
-            'tikkun': 'Tiqqun',
-            'tikun': 'Tiqqun',
-            'dvekut': 'Dwekut',
-            'devekut': 'Dwekut',
-            'bnei baruch': 'Bnej Baruch',
-            'atzilut': 'Azilut'
-        }
-        
-        gefundene_fehler = []
-        
-        for falsch, korrekt in falsche_schreibweisen.items():
-            if falsch.lower() in manifest_text.lower():
-                gefundene_fehler.append(f"{falsch} → {korrekt}")
-        
-        assert len(gefundene_fehler) == 0, \
-            f"Falsche DIN 31636 Schreibweisen: {', '.join(gefundene_fehler)}"
-    
-    def test_sigillum_present(self, manifest_text):
-        """Test: Sigillum-Referenz vorhanden"""
-        # Suche nach Sigillum oder 𝌇
-        has_sigillum = ("sigillum" in manifest_text.lower() or "𝌇" in manifest_text)
-        
-        # Warnung statt Fehler, da nicht immer erforderlich
-        if not has_sigillum:
-            pytest.skip("Sigillum-Referenz fehlt (optional)")
-    
-    def test_q_confirmation(self, manifest_text):
-        """Test: Q! Bestätigung vorhanden"""
-        has_q = "Q!" in manifest_text or "q!" in manifest_text
-        
-        # Info statt Fehler
-        if not has_q:
-            pytest.skip("Q! Bestätigung fehlt (empfohlen)")
-    
-    def test_no_anthropomorphisms(self, manifest_text):
-        """Test: Keine anthropomorphen Begriffe"""
-        verbotene_begriffe = [
-            'liebevoll', 'sanft', 'herzlich', 'behutsam',
-            'wächter', 'beschützer', 'herrscher', 'richter',
-            'von herz zu herz', 'gemeinsam auf dem weg'
-        ]
-        
-        gefunden = []
-        for begriff in verbotene_begriffe:
-            if begriff.lower() in manifest_text.lower():
-                gefunden.append(begriff)
-        
-        assert len(gefunden) == 0, \
-            f"Anthropomorphe Begriffe gefunden: {', '.join(gefunden)}"
-    
-    def test_no_poetry(self, manifest_text):
-        """Test: Keine poetischen Elemente"""
-        poetische_marker = ['♪', '♫', '❤', '💕', '✨', '🌟', '~~~', '***']
-        
-        gefunden = []
-        for marker in poetische_marker:
-            if marker in manifest_text:
-                gefunden.append(marker)
-        
-        assert len(gefunden) == 0, \
-            f"Poetische Elemente gefunden: {', '.join(gefunden)}"
-    
-    def test_valid_sources(self, manifest_data):
-        """Test: Nur erlaubte Quellen verwendet"""
-        erlaubte_quellen = {
-            'ARI', 'Rabbi Jizchak Luria', 'Ez Chajim',
-            'Baal HaSulam', 'Rabbi Jehuda Aschlag', 'TES',
-            'Rabash', 'Rabbi Baruch Aschlag',
-            'Rav Laitman', 'Rav Michael Laitman',
-            'Sohar', 'Zohar'
-        }
-        
-        verbotene_quellen = {
-            'Berg', 'Kabbalah Centre', 'Madonna',
-            'ChatGPT', 'AI', 'KI'
-        }
-        
-        # Prüfe Meta-Quelle
-        quelle = manifest_data.get('meta', {}).get('quelle', '')
-        
-        if quelle:
-            # Prüfe ob verbotene Quelle
-            for verboten in verbotene_quellen:
-                assert verboten.lower() not in quelle.lower(), \
-                    f"Verbotene Quelle gefunden: {verboten}"
-    
-    def test_hns_consistency(self, manifest_data):
-        """Test: HNS-Nummern sind konsistent"""
-        struktur = manifest_data.get('struktur', [])
-        
-        # Sammle alle HNS
-        alle_hns = []
-        for modul in struktur:
-            hns = modul.get('hns', '')
-            if hns:
-                alle_hns.append(hns)
-        
-        # Prüfe auf korrekte Sortierung (optional)
-        sortiert = sorted(alle_hns)
-        if alle_hns != sortiert:
-            pytest.skip("HNS nicht sortiert (optional)")
-    
-    def test_complete_manifest_structure(self, manifest_data):
-        """Test: Manifest hat vollständige Struktur"""
-        erforderliche_felder = ['meta', 'struktur', 'pipeline']
-        
-        for feld in erforderliche_felder:
-            assert feld in manifest_data, f"Erforderliches Feld fehlt: {feld}"
-        
-        # Meta sollte nicht leer sein
-        assert len(manifest_data.get('meta', {})) > 0, "Meta ist leer"
-        
-        # Struktur sollte Module haben
-        assert len(manifest_data.get('struktur', [])) > 0, "Keine Module definiert"
-        
-        # Pipeline sollte Sequenz haben
-        assert 'sequenz' in manifest_data.get('pipeline', {}), "Pipeline-Sequenz fehlt"
+from wwaq_system.validators.wwaq_validator import WWAQValidator, ValidationResult
 
 
-# Negative Tests (sollten fehlschlagen)
-class TestWWAQNegative:
-    """Negative Tests - prüfen dass Validator Fehler findet"""
+def test_zer_detection():
+    """Test Zer-Präfix Erkennung"""
+    validator = WWAQValidator()
     
-    def test_validator_findet_k_fehler(self):
-        """Test: Validator erkennt falsche K-Schreibweise"""
-        test_manifest = {
-            'meta': {'version': '1.0', 'schema': 'HNS10', 'stand': 'test', 'ort': 'test'},
-            'struktur': [{
-                'hns': '1.0.0.0.0.0.0.0.0.0',
-                'name': 'Kabbala-Modul',  # Fehler!
-                'beschreibung': 'Test mit falscher Schreibweise'
-            }],
-            'pipeline': {'sequenz': []}
-        }
-        
-        # Schreibe temporäres Manifest
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-            yaml.dump(test_manifest, f)
-            temp_path = f.name
-        
-        try:
-            validator = WWAQManifestValidator(temp_path)
-            validator.validate_wwaq_konformität()
-            
-            # Sollte Fehler finden
-            k_fehler = [e for e in validator.errors if e.typ == "wwaq_q_vs_k"]
-            assert len(k_fehler) > 0, "Validator hat K-Fehler nicht erkannt"
-        finally:
-            Path(temp_path).unlink()
+    test_cases = [
+        ("Die Kelim zerbrachen", False, ['zerbrachen']),
+        ("Der Tempel wurde zerstört", False, ['zerstört']),
+        ("Die Gefäße barsten", True, []),
+        ("Das Licht wandelte sich", True, []),
+    ]
     
-    def test_validator_findet_zer_fehler(self):
-        """Test: Validator erkennt zer-Präfixe"""
-        test_manifest = {
-            'meta': {'version': '1.0', 'schema': 'HNS10', 'stand': 'test', 'ort': 'test'},
-            'struktur': [{
-                'hns': '1.0.0.0.0.0.0.0.0.0',
-                'name': 'Test-Modul',
-                'beschreibung': 'Modul zum zerbrechen von Strukturen'  # Fehler!
-            }],
-            'pipeline': {'sequenz': []}
-        }
+    for text, should_be_valid, expected_errors in test_cases:
+        result = validator.validate(text)
         
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-            yaml.dump(test_manifest, f)
-            temp_path = f.name
+        if should_be_valid:
+            assert len([e for e in result.errors if 'Zer-Präfix' in e]) == 0, \
+                f"Falsch-positiv für: {text}"
+        else:
+            found_zer = [e for e in result.errors if 'Zer-Präfix' in e]
+            assert len(found_zer) > 0, f"Zer nicht erkannt in: {text}"
+    
+    print("✓ Zer-Präfix Erkennung funktioniert")
+
+
+def test_q_vs_k_detection():
+    """Test Q vs K Unterscheidung"""
+    validator = WWAQValidator()
+    
+    test_cases = [
+        ("Die Kabbala lehrt uns", False, "Kabbala sollte Qabbala sein"),
+        ("Die Qabbala lehrt uns", True, None),
+        ("Berg Kabbalah Centre", True, None),  # Ausnahme
+        ("Mit Kawana beten", False, "Kawana sollte Qawana sein"),
+        ("Mit Qawana beten", True, None),
+    ]
+    
+    for text, should_be_valid, expected_error in test_cases:
+        result = validator.validate(text)
         
-        try:
-            validator = WWAQManifestValidator(temp_path)
-            validator.validate_wwaq_konformität()
-            
-            # Sollte Warnung generieren
-            zer_warnungen = [w for w in validator.warnings if w.typ == "wwaq_zer"]
-            assert len(zer_warnungen) > 0, "Validator hat zer-Präfix nicht erkannt"
-        finally:
-            Path(temp_path).unlink()
+        k_errors = [e for e in result.errors if 'K statt Q' in e]
+        
+        if should_be_valid:
+            assert len(k_errors) == 0, f"Falsch-positiv für: {text}"
+        else:
+            assert len(k_errors) > 0, f"K nicht erkannt in: {text}"
+            if expected_error:
+                assert any(expected_error in e for e in k_errors)
+    
+    print("✓ Q vs K Erkennung funktioniert")
+
+
+def test_anthropomorphism_detection():
+    """Test Anthropomorphismus-Erkennung"""
+    validator = WWAQValidator()
+    
+    forbidden_texts = [
+        "Von Herz zu Herz teilen wir",
+        "Die liebevolle Aufnahme",
+        "Sanfte Korrektur",
+        "Der Zauber der Qabbala",
+        "❤️ Liebe",
+    ]
+    
+    for text in forbidden_texts:
+        result = validator.validate(text)
+        assert len(result.errors) > 0, f"Anthropomorphismus nicht erkannt: {text}"
+        assert any('Anthropomorphismus' in e or 'Emoji' in e for e in result.errors)
+    
+    print("✓ Anthropomorphismus-Erkennung funktioniert")
+
+
+def test_din_conformity():
+    """Test DIN 31636 Konformität"""
+    validator = WWAQValidator()
+    
+    test_cases = [
+        ("Tikkun olam", ['Tiqqun']),
+        ("Tzimtzum Prozess", ['Zimzum']),
+        ("Dvekut erreichen", ['Dwekut']),
+        ("Tiqqun Prozess", []),  # Bereits korrekt
+    ]
+    
+    for text, expected_corrections in test_cases:
+        result = validator.validate(text)
+        
+        if expected_corrections:
+            assert len(result.warnings) > 0, f"DIN-Fehler nicht erkannt: {text}"
+            for correction in expected_corrections:
+                assert any(correction in w for w in result.warnings)
+        else:
+            din_warnings = [w for w in result.warnings if 'DIN' in w]
+            assert len(din_warnings) == 0, f"Falsche DIN-Warnung für: {text}"
+    
+    print("✓ DIN 31636 Prüfung funktioniert")
+
+
+def test_transformation():
+    """Test Text-Transformation"""
+    validator = WWAQValidator()
+    
+    original = "Die Kabbala lehrt dass die Kelim zerbrachen durch Tzimtzum."
+    expected_parts = ["Qabbala", "barsten", "Zimzum", "Q!"]
+    
+    transformed = validator.transform(original)
+    
+    for part in expected_parts:
+        assert part in transformed, f"'{part}' fehlt in transformiertem Text"
+    
+    # Prüfe dass keine verbotenen Wörter mehr da sind
+    assert "Kabbala" not in transformed
+    assert "zerbrachen" not in transformed
+    assert "Tzimtzum" not in transformed
+    
+    print("✓ Transformation funktioniert")
+
+
+def test_complete_validation():
+    """Test vollständige Validierung"""
+    validator = WWAQValidator()
+    
+    # Gültiger WWAQ-Text
+    valid_text = """Die Qabbala lehrt uns über die Einheit.
+Die Gefäße barsten beim Überfluss des Lichts.
+Nach Baal HaSulam ist Tiqqun der Weg.
+
+Q!"""
+    
+    result = validator.validate(valid_text)
+    assert result.is_valid, "Gültiger Text wurde als ungültig markiert"
+    assert result.score > 90, f"Score zu niedrig: {result.score}"
+    
+    # Ungültiger Text
+    invalid_text = """Die Kabbala lehrt liebevoll von Herz zu Herz.
+Die Gefäße zerbrachen mit sanfter Magie ❤️
+Tikkun durch Tzimtzum."""
+    
+    result = validator.validate(invalid_text)
+    assert not result.is_valid, "Ungültiger Text wurde als gültig markiert"
+    assert result.score < 50, f"Score zu hoch: {result.score}"
+    assert len(result.errors) >= 4, "Zu wenige Fehler erkannt"
+    
+    print("✓ Vollständige Validierung funktioniert")
+
+
+def test_edge_cases():
+    """Test Grenzfälle"""
+    validator = WWAQValidator()
+    
+    # Leerer Text
+    result = validator.validate("")
+    assert len(result.warnings) > 0  # Sollte Q! vermissen
+    
+    # Nur Q!
+    result = validator.validate("Q!")
+    assert result.is_valid
+    
+    # Gemischte Groß-/Kleinschreibung
+    result = validator.validate("Die KABBALA und kabbala")
+    assert len(result.errors) == 2  # Beide Varianten sollten erkannt werden
+    
+    print("✓ Grenzfälle korrekt behandelt")
 
 
 if __name__ == "__main__":
-    # Führe Tests aus
-    pytest.main([__file__, "-v", "--tb=short"])
+    print("\nWWAQ SPECIFIC TESTS")
+    print("="*40)
+    
+    try:
+        test_zer_detection()
+        test_q_vs_k_detection()
+        test_anthropomorphism_detection()
+        test_din_conformity()
+        test_transformation()
+        test_complete_validation()
+        test_edge_cases()
+        
+        print("\n✓ Alle WWAQ-Tests bestanden!")
+        print("\nQ!")
+    except AssertionError as e:
+        print(f"\n✗ Test fehlgeschlagen: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n✗ Fehler: {e}")
+        sys.exit(1)
